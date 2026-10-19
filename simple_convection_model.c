@@ -4,19 +4,24 @@
 
 // Simple convection climate model
 // Conventions: Used Units are SI Units
-// Atmosphere lists
+// Atmosphere lists are ordered from 0 (top) to nlayer/nlayer-1 for levels and layers
 
-// Definition of constants
+  //////////////////////////////
+ /// Definition of constants //
+//////////////////////////////
+
 #define G 9.80665
 #define CP 1004.0
 #define R_DRY 287.05 //specific gas constant for dry air (J/kg /K)
-#define KAPPA (2.0/7.0)
+#define KAPPA (R_DRY/CP) // exponent of potential temperature calculation
 #define GAMMA_WET 0.0065 // mean atmospheric temperature gradient (K/m)
 #define GAMMA_DRY 0.01 // dry adiabatic temperature gradient (K/m)  
 #define SIGMA 5.670374419e-8 // Stefan-Boltzmann constant (W/m^2 K^4)
 
+  ////////////////////////////////////////////
+ /// Definition of useful helper functions //
+////////////////////////////////////////////
 
-// Definition of useful helper functions
 double TtoTheta (double p, double T){ // an inverse calc could be useful and implemented here too
     /*Convert a given temperature to the respective potential temperature or vice-versa, p in Pa, T in K
     For calculation o f T from theta, the T argument has to hold the theta value  */
@@ -53,30 +58,69 @@ double heating_rate(double Eabs, double dt, double dp) {
     return Eabs * dt * G / (dp * CP);
 }
 
+void convection(double T_lay[], double theta_lay[], int nlayer) {
+
+    int unsorted = 1; // flag to indicate that the layers are unsorted
+        while (unsorted == 1){
+            unsorted = 0;
+            for (int i = nlayer-1; i > -1 ; i--){
+                if (theta_lay[i-1] < theta_lay[i]){ // check for convective instability
+                    unsorted = 1;
+                    // swap temperatures and potential temperatures of the two layers
+                    double temp_T = T_lay[i];
+                    T_lay[i] = T_lay[i-1];
+                    T_lay[i-1] = temp_T;
+
+                    double temp_theta = theta_lay[i];
+                    theta_lay[i] = theta_lay[i-1];
+                    theta_lay[i-1] = temp_theta;
+                    }
+                }
+            }
+    
+}
+
+  ////////////////////////////
+ /// Main program function //
+////////////////////////////
+
+
 int main(int argc, char **argv)
 {
     // Model constraints
     int nlayer = 20;
-    int n_timesteps = 1000;
+    int n_timesteps = 10000;
 
-    // Define atmosphere
-    double Eabs = 240;
+    // Define atmosphere TODO: sinnvoll sortieren!
+    double Eabs = 240; // default for incoming energy on ground (W/m^2)
     double dt = 3600; // time increment for model (s) TODO: check unit
     double p_ref = 100000.0; // reference pressure for potential temperature calculation
+    double dp = 100000.0 / nlayer; // pressure difference betw. levels (Pa)
     double T_lowest_init = 288; // initial temperature of lowest layer (K)
 
-    double p_lev[nlayer + 1]; // pressure levels (Pa)
-    double theta_lay[nlayer];
-    double T_lay[nlayer]; // layer temperatures (K)
-    double T_lev[nlayer + 1];   // level temperatures (K)
 
-    double dp = 100000.0 / nlayer; // pressure difference betw. levels (Pa)
-    double p_lay[nlayer]; // mean assumed pressure for each layer (Pa)
+    double p_lev[nlayer + 1]; // pressure levels (Pa)
+    double T_lev[nlayer + 1];   // level temperatures (K)
     double z_lev[nlayer + 1]; // geometric height levels (m)
+
+    double theta_lay[nlayer]; // layer potential temperatures
+    double T_lay[nlayer]; // layer temperatures (K)
+    double p_lay[nlayer]; // mean assumed pressure for each layer (Pa)
     double z_lay[nlayer]; // geometric height of each layer (m)
+
 
     double E_up [nlayer+1]; // upward energy flux at each level (W/m^2)
     double E_down [nlayer+1]; // downward energy flux at each level (W/m^2)
+
+    double alphas [nlayer]; // absorption coefficients of each layer
+    double transmiss [nlayer]; // transmissivity of each layer (t = 1-alpha)
+
+
+
+      /////////////////////////////////
+     // Atmosphere initializations ///
+    /////////////////////////////////
+
 
     // Initialize pressure levels
     for (int i = 0; i < nlayer + 1; i++) //
@@ -84,7 +128,8 @@ int main(int argc, char **argv)
         p_lev[i] = i * dp; // list of level pressures
     }
 
-    for (int i = 0; i < nlayer; i++) //initialzie layer pressures
+    //initialzie layer pressures
+    for (int i = 0; i < nlayer; i++) 
     {
         p_lay[i] = (p_lev[i] + p_lev[i+1]) / 2.0; // pressure for each layer as mean of the two pressure levels
     }
@@ -105,28 +150,48 @@ int main(int argc, char **argv)
     {   
         theta_lay[i] = TtoTheta(p_lay[i], T_lay[i]); // calculate potential temperature for each layer given the starting temp an layer press
     }
+ 
 
-
-    // Calculate temperature change from energy input
-    double dT = heating_rate(Eabs, dt, dp); // calculate temperature change from energy input 
-
-    // Print results
+    // Print results of initialization
+    printf("Model initialized!");
     for (int i = 0; i < nlayer; i++)
     {
         printf("Layer %d: p = %.1f Pa, theta = %.2f K, temperature = %.2f K, altitude = %.2f m\n ",
                i, p_lay[i], theta_lay[i], T_lay[i], z_lay[i]);
     }
-
-    printf("Temperature change: %.6f K\n", dT);
-
-    int count = 0; 
+ 
+      //////////////////////// 
+     //// Main model loop ///
+    ////////////////////////
+    int count = 0;
     while (count < n_timesteps) {
+
         count++;
+
+        // Calculate the heating rate and heat lowest layer
+        double dT = heating_rate(Eabs, dt, dp);
+        T_lay[nlayer - 1] += dT;// Update the temperature of the lowermost layer
+        theta_lay[nlayer - 1] = TtoTheta(p_lay[nlayer - 1], T_lay[nlayer - 1]);// Update the potential temperature of the lowermost layer
+
+        // Calculate Flux boundary conditions
+        E_up[nlayer] = SIGMA * pow(T_lay[nlayer-1], 4); // lowest layer heating the layer above (Boltzmann)
+        E_down[0] = 0; // highest layer does not receive significant amounts of energy from space
+
         
-        //T[nlayer-1] += dT; // Update temperature of the lowermost layer
-        //theta[nlayer-1] = T[nlayer-1] * pow(p_ref / play[nlayer-1], 0.286);
-        // sort by theta and update T accordingly
-        // radiative transfer from T 
+
+        // do convection
+        convection(T_lay, theta_lay, nlayer);
+
+    }
+
+
+    // Print results of model run
+    printf("Model run completed after %i iterations \n", count);
+    for (int i = 0; i < nlayer; i++)
+    {
+        printf("Layer %d: p = %.1f Pa, theta = %.2f K, temperature = %.2f K\n ",
+               i, p_lay[i], theta_lay[i], T_lay[i]);
+    }
 
 
     return 0;
