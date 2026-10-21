@@ -4,7 +4,20 @@
 
 // Simple convection climate model
 // Conventions: Used Units are SI Units
-// Atmosphere lists are ordered from 0 (top) to nlayer/nlayer-1 for levels and layers
+// Atmosphere lists are ordered from 0 (top) to nlayer/nlayer-1 for levels and layers:
+
+//  0-------------------0
+//            0
+//  1-------------------1
+//            1
+//
+//               ...
+//  nlay-1-------------------nlay-1
+//              nlay-2
+//    nlay-------------------nlay
+//              nlay-1
+
+
 
   //////////////////////////////
  /// Definition of constants //
@@ -22,7 +35,7 @@
  /// Definition of useful helper functions //
 ////////////////////////////////////////////
 
-double TtoTheta (double p, double T){ // an inverse calc could be useful and implemented here too
+double TtoTheta (double p, double T, bool inverse){ // an inverse calc could be useful and implemented here too
     /*Convert a given temperature to the respective potential temperature or vice-versa, p in Pa, T in K
     For calculation o f T from theta, the T argument has to hold the theta value  */
     double p0 = 100000;
@@ -31,7 +44,11 @@ double TtoTheta (double p, double T){ // an inverse calc could be useful and imp
     double temp = T * pow(p/p0, KAPPA); // not yet implemented: simple if statement on additional arg
 
     // for calculation of T from theta: assume T is the theta value
-    return theta;
+    if (inverse) {
+        return temp;
+    } else {
+        return theta;
+    }
 }
 
 void init_heights_temps(const double p[], double T[], double z[],
@@ -58,26 +75,26 @@ double heating_rate(double Eabs, double dt, double dp) {
     return Eabs * dt * G / (dp * CP);
 }
 
-void convection(double T_lay[], double theta_lay[], int nlayer) {
+void convection(double T_lay[], double theta_lay[], double p_lay[], int nlayer) {
 
     int unsorted = 1; // flag to indicate that the layers are unsorted
-        while (unsorted == 1){
-            unsorted = 0;
-            for (int i = nlayer-1; i > -1 ; i--){
-                if (theta_lay[i-1] < theta_lay[i]){ // check for convective instability
-                    unsorted = 1;
-                    // swap temperatures and potential temperatures of the two layers
-                    double temp_T = T_lay[i];
-                    T_lay[i] = T_lay[i-1];
-                    T_lay[i-1] = temp_T;
+    while (unsorted == 1){
+        unsorted = 0;
+        for (int i = nlayer-1; i > -1 ; i--){ // sort from bottom to top for faster runtime
+            if (i == 0){} // this case is covered by i = 1 already
+            else if (theta_lay[i-1] < theta_lay[i]){ // check for convective instability 
+                unsorted = 1;//code reaches this area!
+                // swap potential temperatures of the two layers
 
-                    double temp_theta = theta_lay[i];
-                    theta_lay[i] = theta_lay[i-1];
-                    theta_lay[i-1] = temp_theta;
-                    }
+                double temp_theta = theta_lay[i];
+                theta_lay[i] = theta_lay[i-1];
+                theta_lay[i-1] = temp_theta;
                 }
             }
-    
+        }
+    for (int i = 0; i < nlayer; i++) {
+        T_lay[i] = TtoTheta(p_lay[i], theta_lay[i], 1);
+    }
 }
 
   ////////////////////////////
@@ -88,8 +105,8 @@ void convection(double T_lay[], double theta_lay[], int nlayer) {
 int main(int argc, char **argv)
 {
     // Model constraints
-    int nlayer = 20;
-    int n_timesteps = 10000;
+    int nlayer = 10;
+    int n_timesteps = 1000;
 
     // Define atmosphere TODO: sinnvoll sortieren!
     double Eabs = 240; // default for incoming energy on ground (W/m^2)
@@ -148,15 +165,14 @@ int main(int argc, char **argv)
     // calculate potential temperature
     for (int i = 0; i < nlayer; i++)
     {   
-        theta_lay[i] = TtoTheta(p_lay[i], T_lay[i]); // calculate potential temperature for each layer given the starting temp an layer press
+        theta_lay[i] = TtoTheta(p_lay[i], T_lay[i], 0); // calculate potential temperature for each layer given the starting temp an layer press
     }
  
 
     // Print results of initialization
-    printf("Model initialized!");
     for (int i = 0; i < nlayer; i++)
     {
-        printf("Layer %d: p = %.1f Pa, theta = %.2f K, temperature = %.2f K, altitude = %.2f m\n ",
+        printf("Layer %d: p = %.1f Pa, theta = %.2f K, temperature = %.2f K, altitude = %.2f m\n",
                i, p_lay[i], theta_lay[i], T_lay[i], z_lay[i]);
     }
  
@@ -166,22 +182,44 @@ int main(int argc, char **argv)
     int count = 0;
     while (count < n_timesteps) {
 
-        count++;
+        count++; // TODO: potentially relocate to bottom?
 
         // Calculate the heating rate and heat lowest layer
         double dT = heating_rate(Eabs, dt, dp);
         T_lay[nlayer - 1] += dT;// Update the temperature of the lowermost layer
-        theta_lay[nlayer - 1] = TtoTheta(p_lay[nlayer - 1], T_lay[nlayer - 1]);// Update the potential temperature of the lowermost layer
+        theta_lay[nlayer - 1] = TtoTheta(p_lay[nlayer - 1], T_lay[nlayer - 1], 0);// Update the potential temperature of the lowermost layer
+
 
         // Calculate Flux boundary conditions
         E_up[nlayer] = SIGMA * pow(T_lay[nlayer-1], 4); // lowest layer heating the layer above (Boltzmann)
         E_down[0] = 0; // highest layer does not receive significant amounts of energy from space
 
-        
+        // calculate upwards fluxes at each level
+        for (int i = nlayer-1; i > -1 ; i--){ // TODO: check correct loop boundaries and indicecs
+            E_up[i] = E_up[i+1] * transmiss[i] + SIGMA * pow(T_lay[i], 4) * alphas[i];
+        }
+
+        //calculate downwards fluxes at each level
+        for (int i = 0; i < nlayer + 1; i++){ // TODO: check correct loop boundaries and indices
+            E_down[i+1] =  E_down[i] * transmiss[i] + SIGMA* pow(T_lay[i], 4) * alphas[i];
+        }
+
 
         // do convection
-        convection(T_lay, theta_lay, nlayer);
+        convection(T_lay, theta_lay, p_lay, nlayer);
+        
 
+        // create CSV format output via print
+        for (int i = 0; i < nlayer; i++)
+        {
+
+            printf("%i ; %.1f ; %.2f ; %.2f ;",
+                i, p_lay[i], theta_lay[i], T_lay[i]);
+            
+            if (i == nlayer-1) {
+                printf("\n");
+            }
+        }
     }
 
 
@@ -189,7 +227,7 @@ int main(int argc, char **argv)
     printf("Model run completed after %i iterations \n", count);
     for (int i = 0; i < nlayer; i++)
     {
-        printf("Layer %d: p = %.1f Pa, theta = %.2f K, temperature = %.2f K\n ",
+        printf("Layer %d: p = %.1f Pa, theta = %.2f K, temperature = %.2f K\n",
                i, p_lay[i], theta_lay[i], T_lay[i]);
     }
 
