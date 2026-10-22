@@ -30,6 +30,7 @@
 #define GAMMA_WET 0.0065 // mean atmospheric temperature gradient (K/m)
 #define GAMMA_DRY 0.01 // dry adiabatic temperature gradient (K/m)  
 #define SIGMA 5.670374419e-8 // Stefan-Boltzmann constant (W/m^2 K^4)
+#define P_REF 100000.0 // reference pressure for potential temperature calculation
 
   ////////////////////////////////////////////
  /// Definition of useful helper functions //
@@ -38,10 +39,9 @@
 double TtoTheta (double p, double T, bool inverse){ // an inverse calc could be useful and implemented here too
     /*Convert a given temperature to the respective potential temperature or vice-versa, p in Pa, T in K
     For calculation o f T from theta, the T argument has to hold the theta value  */
-    double p0 = 100000;
 
-    double theta = T * pow(p0/p, KAPPA);
-    double temp = T * pow(p/p0, KAPPA); // not yet implemented: simple if statement on additional arg
+    double theta = T * pow(P_REF/p, KAPPA);
+    double temp = T * pow(p/P_REF, KAPPA); 
 
     // for calculation of T from theta: assume T is the theta value
     if (inverse) {
@@ -65,7 +65,7 @@ void init_heights_temps(const double p[], double T[], double z[],
 
     z[s] = 0.0;
 
-    for (int k = 0; k < s; k++) {// loop over all levels above the ground
+    for (int k = 0; k < s; k++) {// loop over all levels above the ground, hypsometric eq.
         T[k] = T0 * pow(p[k] / p0, exponent);
         z[k] = (T0 - T[k]) / gamma;
     }
@@ -86,7 +86,7 @@ void convection(double T_lay[], double theta_lay[], double p_lay[], int nlayer) 
                 unsorted = 1;//code reaches this area!
                 // swap potential temperatures of the two layers
 
-                double temp_theta = theta_lay[i];
+                double temp_theta = theta_lay[i]; // intermediate step for sorting 
                 theta_lay[i] = theta_lay[i-1];
                 theta_lay[i-1] = temp_theta;
                 }
@@ -106,15 +106,16 @@ int main(int argc, char **argv)
 {
     // Model constraints
     int nlayer = 10;
-    int n_timesteps = 1000;
+    int n_timesteps = 10000;
 
     // Define atmosphere TODO: sinnvoll sortieren!
-    double Eabs = 240; // default for incoming energy on ground (W/m^2)
-    double dt = 3600; // time increment for model (s) TODO: check unit
-    double p_ref = 100000.0; // reference pressure for potential temperature calculation
+    double Eground = 240; // default for incoming energy on ground (W/m^2)
+    double dt = 3600; // time increment for model (s) 
     double dp = 100000.0 / nlayer; // pressure difference betw. levels (Pa)
     double T_lowest_init = 288; // initial temperature of lowest layer (K)
 
+    double alpha = 0.95; // absorption coefficient (const for all layers currently)
+    double transmissivity = 1-alpha;
 
     double p_lev[nlayer + 1]; // pressure levels (Pa)
     double T_lev[nlayer + 1];   // level temperatures (K)
@@ -128,11 +129,19 @@ int main(int argc, char **argv)
 
     double E_up [nlayer+1]; // upward energy flux at each level (W/m^2)
     double E_down [nlayer+1]; // downward energy flux at each level (W/m^2)
+    double E_net [nlayer+1]; // net energy flux at each level(W/m^2)
+
+    double E_abs [nlayer]; // LAYER QTY!! Net absorbed energy at each layer (E_net[i] - E_net[i+1])
 
     double alphas [nlayer]; // absorption coefficients of each layer
     double transmiss [nlayer]; // transmissivity of each layer (t = 1-alpha)
 
-
+    for (int i = 0; i < nlayer; i++) {// initialize alpha vals for all layers (constant value for now, profile TBD)
+        alphas[i] = alpha;
+    }
+    for (int i = 0; i < nlayer; i++) {// initialize transmissivity vals for all layers (constant value for now, profile TBD)
+        transmiss[i] = transmissivity;
+    }
 
       /////////////////////////////////
      // Atmosphere initializations ///
@@ -182,12 +191,10 @@ int main(int argc, char **argv)
     int count = 0;
     while (count < n_timesteps) {
 
-        count++; // TODO: potentially relocate to bottom?
-
         // Calculate the heating rate and heat lowest layer
-        double dT = heating_rate(Eabs, dt, dp);
-        T_lay[nlayer - 1] += dT;// Update the temperature of the lowermost layer
-        theta_lay[nlayer - 1] = TtoTheta(p_lay[nlayer - 1], T_lay[nlayer - 1], 0);// Update the potential temperature of the lowermost layer
+        //double dT = heating_rate(Eground, dt, dp);
+        //T_lay[nlayer - 1] += dT;// Update the temperature of the lowermost layer
+        //theta_lay[nlayer - 1] = TtoTheta(p_lay[nlayer - 1], T_lay[nlayer - 1], 0);// Update the potential temperature of the lowermost layer
 
 
         // Calculate Flux boundary conditions
@@ -204,7 +211,30 @@ int main(int argc, char **argv)
             E_down[i+1] =  E_down[i] * transmiss[i] + SIGMA* pow(T_lay[i], 4) * alphas[i];
         }
 
+        //calculate E_net for each level (E_net = E_dn - E_up)
+        for (int i = 0; i < nlayer + 1;  i++){
+            E_net[i] = E_down[i] - E_up[i];
+        }
 
+        //calculate E_abs for each layer (E_abs = Enet von oben - E_net von unten) problematischster Teil
+        for (int i = 0; i < nlayer; i++){   // Layer quantity
+            E_abs[i] = E_net[i] - E_net[i+1]; // doch lieber ein minus ????
+            if (i == nlayer - 1){
+                E_abs[i] = Eground - E_net[i + 1]; // TODO: ground heating included here! Must remove above!
+            }
+        }
+
+        // update temperature for each layer using E_abs 
+        for (int i = 0; i < nlayer; i++){
+            double dT = heating_rate(E_abs[i], dt, dp);
+            T_lay[i] += dT;
+        }
+        
+        // update potential temperatures for each layer using E_abs
+        for (int i = 0; i < nlayer; i++){
+            theta_lay[i] = TtoTheta(p_lay[i], T_lay[i], 0);// Update the potential temperature of the layers
+        }
+        
         // do convection
         convection(T_lay, theta_lay, p_lay, nlayer);
         
@@ -220,6 +250,7 @@ int main(int argc, char **argv)
                 printf("\n");
             }
         }
+        count++; // increment counter after each timestep
     }
 
 
