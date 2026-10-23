@@ -198,7 +198,7 @@ int main(int argc, char **argv)
 
 
         // Calculate Flux boundary conditions
-        E_up[nlayer] = SIGMA * pow(T_lay[nlayer-1], 4); // lowest layer heating the layer above (Boltzmann)
+        E_up[nlayer] = Eground; // flux from lowest layer is just ground flux (+ emission of layer itself which is calculated in the upward flux loop)//SIGMA * pow(T_lay[nlayer-1], 4); // lowest layer heating the layer above (Boltzmann)
         E_down[0] = 0; // highest layer does not receive significant amounts of energy from space
 
         // calculate upwards fluxes at each level
@@ -207,7 +207,7 @@ int main(int argc, char **argv)
         }
 
         //calculate downwards fluxes at each level
-        for (int i = 0; i < nlayer + 1; i++){ // TODO: check correct loop boundaries and indices
+        for (int i = 0; i < nlayer; i++){ // so, anstatt i < nlayer +1, weil wir vom oberstem level bis zum boden E_down berechnen
             E_down[i+1] =  E_down[i] * transmiss[i] + SIGMA* pow(T_lay[i], 4) * alphas[i];
         }
 
@@ -218,10 +218,10 @@ int main(int argc, char **argv)
 
         //calculate E_abs for each layer (E_abs = Enet von oben - E_net von unten) problematischster Teil
         for (int i = 0; i < nlayer; i++){   // Layer quantity
-            E_abs[i] = E_net[i] - E_net[i+1]; // doch lieber ein minus ????
-            if (i == nlayer - 1){
-                E_abs[i] = Eground - E_net[i + 1]; // TODO: ground heating included here! Must remove above!
-            }
+            E_abs[i] = E_net[i] - E_net[i+1]; // minus makes sense as fluxes pointing upwards are negative --> - (a negative quantity) > 0, basically adding energy
+            //if (i == nlayer - 1){
+            //    E_abs[i] = Eground - E_net[i + 1]; // TODO: ground heating included here! Must remove above!
+            //} this is all removed bc at lowest layer E_up[nlayer] = Eground; i.e. surface flux is already accounted for!!
         }
 
         // update temperature for each layer using E_abs 
