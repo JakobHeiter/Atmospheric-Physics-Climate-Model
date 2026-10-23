@@ -105,8 +105,8 @@ void convection(double T_lay[], double theta_lay[], double p_lay[], int nlayer) 
 int main(int argc, char **argv)
 {
     // Model constraints
-    int nlayer = 10;
-    int n_timesteps = 10000;
+    int nlayer = 200;
+    int n_timesteps = 8000;
 
     // Define atmosphere TODO: sinnvoll sortieren!
     double Eground = 240; // default for incoming energy on ground (W/m^2)
@@ -114,7 +114,7 @@ int main(int argc, char **argv)
     double dp = 100000.0 / nlayer; // pressure difference betw. levels (Pa)
     double T_lowest_init = 288; // initial temperature of lowest layer (K)
 
-    double alpha = 0.95; // absorption coefficient (const for all layers currently)
+    double alpha = 0.9999; // absorption coefficient (const for all layers currently)
     double transmissivity = 1-alpha;
 
     double p_lev[nlayer + 1]; // pressure levels (Pa)
@@ -219,7 +219,7 @@ int main(int argc, char **argv)
         //calculate E_abs for each layer (E_abs = Enet von oben - E_net von unten) problematischster Teil
         for (int i = 0; i < nlayer; i++){   // Layer quantity
             E_abs[i] = E_net[i] - E_net[i+1]; // minus makes sense as fluxes pointing upwards are negative --> - (a negative quantity) > 0, basically adding energy
-            //if (i == nlayer - 1){
+            //if (i == nlayer - 1){ FRAGE: ich checke hier nicht warum da nd i+1 und i+2 stehen muss...
             //    E_abs[i] = Eground - E_net[i + 1]; // TODO: ground heating included here! Must remove above!
             //} this is all removed bc at lowest layer E_up[nlayer] = Eground; i.e. surface flux is already accounted for!!
         }
@@ -243,8 +243,8 @@ int main(int argc, char **argv)
         for (int i = 0; i < nlayer; i++)
         {
 
-            printf("%i ; %.1f ; %.2f ; %.2f ;",
-                i, p_lay[i], theta_lay[i], T_lay[i]);
+            printf("%i ; %.1f ; %.2f ; %.2f ; %.2f ; ",
+                i, p_lay[i], theta_lay[i], T_lay[i], z_lay[i]);
             
             if (i == nlayer-1) {
                 printf("\n");
