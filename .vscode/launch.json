@@ -7,9 +7,9 @@
       "request": "launch",
       "args": [],
       "stopAtEntry": false,
-      "externalConsole": true,
-      "cwd": "c:/Users/jakej/OneDrive/Dokumente/Meteorologie Master/1. Semester/Advanced atmospheric physics/Atmospheric-Physics-Climate-Model",
-      "program": "c:/Users/jakej/OneDrive/Dokumente/Meteorologie Master/1. Semester/Advanced atmospheric physics/Atmospheric-Physics-Climate-Model/build/Debug/outDebug",
+      "externalConsole": false,
+      "cwd": "/Users/flip/Master/Adv.Physics/Atmospheric-Physics-Climate-Model/Atmospheric-Physics-Climate-Model/Atmospheric-Physics-Climate-Model/Atmospheric-Physics-Climate-Model/Atmospheric-Physics-Climate-Model",
+      "program": "/Users/flip/Master/Adv.Physics/Atmospheric-Physics-Climate-Model/Atmospheric-Physics-Climate-Model/Atmospheric-Physics-Climate-Model/Atmospheric-Physics-Climate-Model/Atmospheric-Physics-Climate-Model/build/Debug/outDebug",
       "MIMode": "gdb",
       "miDebuggerPath": "gdb",
       "setupCommands": [

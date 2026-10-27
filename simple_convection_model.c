@@ -114,7 +114,11 @@ void convection(double T_lay[], double theta_lay[], double p_lay[], int nlayer) 
 int main(int argc, char **argv)
 {
     // Model constraints
+<<<<<<< HEAD
     int nlayer = 40;
+=======
+    int nlayer = 200;
+>>>>>>> e4b5011d31ef730a86f3add7754d34b223af3b8a
     int n_timesteps = 8000;
 
     // Define atmosphere TODO: sinnvoll sortieren!
@@ -123,7 +127,11 @@ int main(int argc, char **argv)
     double dp = 100000.0 / nlayer; // pressure difference betw. levels (Pa)
     double T_lowest_init = 288; // iniial temperature of lowest layer (K)
 
+<<<<<<< HEAD
     double alpha = 0.944; // absorption coefficient (const for all layers currently); 0.944 yield Eq. Temp of 288.55
+=======
+    double alpha = 0.9999; // absorption coefficient (const for all layers currently)
+>>>>>>> e4b5011d31ef730a86f3add7754d34b223af3b8a
     double transmissivity = 1-alpha;
 
     double p_lev[nlayer + 1]; // pressure levels (Pa)
@@ -221,10 +229,16 @@ int main(int argc, char **argv)
             E_down[i+1] =  E_down[i] * alphas[i] + SIGMA* pow(T_lay[i], 4) * transmiss[i];
         }
 
+<<<<<<< HEAD
         E_up[nlayer] = Eground + E_down[nlayer]; // surface balance, what is radiated into ground must be reemitted!
         // calculate upwards fluxes at each level
         for (int i = nlayer-1; i > -1 ; i--){ // TODO: check correct loop boundaries and indicecs
             E_up[i] = E_up[i+1] * alphas[i] + SIGMA * pow(T_lay[i], 4) * transmiss[i];
+=======
+        //calculate downwards fluxes at each level
+        for (int i = 0; i < nlayer; i++){ // so, anstatt i < nlayer +1, weil wir vom oberstem level bis zum boden E_down berechnen
+            E_down[i+1] =  E_down[i] * transmiss[i] + SIGMA* pow(T_lay[i], 4) * alphas[i];
+>>>>>>> e4b5011d31ef730a86f3add7754d34b223af3b8a
         }
 
         //calculate E_net for each level (E_net = E_dn - E_up)
