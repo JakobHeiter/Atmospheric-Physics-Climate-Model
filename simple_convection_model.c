@@ -18,6 +18,15 @@
 //              nlay-1
 
 
+  ////////////////
+ /// TODO List //
+////////////////
+
+// O Add dynamic stopping condition when in equilibrium (Check temp change over time < epsilon)
+// O Clear the alpha/tau confusion
+// O Implement Radiances as in Lecture
+
+
 
   ////////////////////////////// 
  /// Definition of constants //
@@ -51,17 +60,17 @@ double TtoTheta (double p, double T, bool inverse){ // an inverse calc could be 
     }
 }
 
-void init_heights_temps(const double p[], double T[], double z[],
+void init_heights_temps(double p[], double T[], double z[],
                         double gamma, int num_levels) {
     /* Initializes temperature T[] (K) and height z[] (m) on pressure levels p[] (Pa).
        Ordering: p[0] = 0 Pa (top), p[num_levels-1] = ground pressure.
        T[num_levels-1] must be set by the caller as the surface temperature.
        Heights are relative to the ground (z = 0 at the last level). */
 
-    const int s = num_levels - 1;            // surface index
-    const double T0 = T[s];
-    const double p0 = p[s];
-    const double exponent = R_DRY * gamma / G;
+    int s = num_levels - 1;            // surface index
+    double T0 = T[s];
+    double p0 = p[s];
+    double exponent = R_DRY * gamma / G;
 
     z[s] = 0.0;
 
@@ -105,16 +114,16 @@ void convection(double T_lay[], double theta_lay[], double p_lay[], int nlayer) 
 int main(int argc, char **argv)
 {
     // Model constraints
-    int nlayer = 10;
-    int n_timesteps = 10000;
+    int nlayer = 40;
+    int n_timesteps = 8000;
 
     // Define atmosphere TODO: sinnvoll sortieren!
     double Eground = 240; // default for incoming energy on ground (W/m^2)
     double dt = 3600; // time increment for model (s) 
     double dp = 100000.0 / nlayer; // pressure difference betw. levels (Pa)
-    double T_lowest_init = 288; // initial temperature of lowest layer (K)
+    double T_lowest_init = 288; // iniial temperature of lowest layer (K)
 
-    double alpha = 0.95; // absorption coefficient (const for all layers currently)
+    double alpha = 0.944; // absorption coefficient (const for all layers currently); 0.944 yield Eq. Temp of 288.55
     double transmissivity = 1-alpha;
 
     double p_lev[nlayer + 1]; // pressure levels (Pa)
@@ -164,11 +173,17 @@ int main(int argc, char **argv)
     T_lev[nlayer] = T_lowest_init; // set initial temperature on the lowest level
     init_heights_temps(p_lev, T_lev, z_lev, GAMMA_DRY, nlayer+1); // z used as helper for temp init for now
 
-    for (int i = 0; i < nlayer; i++) 
-    {
-        T_lay[i] = (T_lev[i] + T_lev[i+1]) / 2.0; // layer temperatures as mean of the two level temperatures
-        z_lay[i] = (z_lev[i] + z_lev[i+1]) / 2.0; // geometric height of each layer as mean of the two level heights
+   for (int i = 0; i < nlayer; i++)
+{
+    if (i == 0) {
+        T_lay[i] = TtoTheta(p_lay[i], T_lowest_init, 1);
     }
+    else {
+        T_lay[i] = (T_lev[i] + T_lev[i+1]) / 2.0;
+    }
+
+    z_lay[i] = (z_lev[i] + z_lev[i+1]) / 2.0;
+}
 
 
     // calculate potential temperature
@@ -198,30 +213,31 @@ int main(int argc, char **argv)
 
 
         // Calculate Flux boundary conditions
-        E_up[nlayer] = SIGMA * pow(T_lay[nlayer-1], 4); // lowest layer heating the layer above (Boltzmann)
+        E_up[nlayer] = Eground; // flux from lowest layer is just ground flux (+ emission of layer itself which is calculated in the upward flux loop)//SIGMA * pow(T_lay[nlayer-1], 4); // lowest layer heating the layer above (Boltzmann)
         E_down[0] = 0; // highest layer does not receive significant amounts of energy from space
 
-        // calculate upwards fluxes at each level
-        for (int i = nlayer-1; i > -1 ; i--){ // TODO: check correct loop boundaries and indicecs
-            E_up[i] = E_up[i+1] * transmiss[i] + SIGMA * pow(T_lay[i], 4) * alphas[i];
+        //calculate downwards fluxes at each level
+        for (int i = 0; i < nlayer; i++){ // so, anstatt i < nlayer +1, weil wir vom oberstem level bis zum boden E_down berechnen
+            E_down[i+1] =  E_down[i] * alphas[i] + SIGMA* pow(T_lay[i], 4) * transmiss[i];
         }
 
-        //calculate downwards fluxes at each level
-        for (int i = 0; i < nlayer + 1; i++){ // TODO: check correct loop boundaries and indices
-            E_down[i+1] =  E_down[i] * transmiss[i] + SIGMA* pow(T_lay[i], 4) * alphas[i];
+        E_up[nlayer] = Eground + E_down[nlayer]; // surface balance, what is radiated into ground must be reemitted!
+        // calculate upwards fluxes at each level
+        for (int i = nlayer-1; i > -1 ; i--){ // TODO: check correct loop boundaries and indicecs
+            E_up[i] = E_up[i+1] * alphas[i] + SIGMA * pow(T_lay[i], 4) * transmiss[i];
         }
 
         //calculate E_net for each level (E_net = E_dn - E_up)
         for (int i = 0; i < nlayer + 1;  i++){
-            E_net[i] = E_down[i] - E_up[i];
+            E_net[i] = E_down[i] - E_up[i]; // upwards flux is "leaving" earth -> negative sign
         }
 
-        //calculate E_abs for each layer (E_abs = Enet von oben - E_net von unten) problematischster Teil
+        //calculate E_abs for each layer (E_abs = Enet von oben - E_net von unten): problematischster Teil
         for (int i = 0; i < nlayer; i++){   // Layer quantity
-            E_abs[i] = E_net[i] - E_net[i+1]; // doch lieber ein minus ????
-            if (i == nlayer - 1){
-                E_abs[i] = Eground - E_net[i + 1]; // TODO: ground heating included here! Must remove above!
-            }
+            E_abs[i] = E_net[i] - E_net[i+1]; // minus makes sense as fluxes pointing upwards are negative --> - (a negative quantity) > 0, basically adding energy
+            //if (i == nlayer - 1){ FRAGE: ich checke hier nicht warum da nd i+1 und i+2 stehen muss...
+            //    E_abs[i] = Eground - E_net[i + 1]; // TODO: ground heating included here! Must remove above!
+            //} this is all removed bc at lowest layer E_up[nlayer] = Eground; i.e. surface flux is already accounted for!!
         }
 
         // update temperature for each layer using E_abs 
@@ -243,8 +259,8 @@ int main(int argc, char **argv)
         for (int i = 0; i < nlayer; i++)
         {
 
-            printf("%i ; %.1f ; %.2f ; %.2f ;",
-                i, p_lay[i], theta_lay[i], T_lay[i]);
+            printf("%i ; %.1f ; %.2f ; %.2f ; %.2f ; ",
+                i, p_lay[i], theta_lay[i], T_lay[i], z_lay[i]);
             
             if (i == nlayer-1) {
                 printf("\n");
