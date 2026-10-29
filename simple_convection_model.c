@@ -106,6 +106,58 @@ void convection(double T_lay[], double theta_lay[], double p_lay[], int nlayer) 
     }
 }
 
+// calculates the spectral radiance for given temperature and wavelength
+double planck(double T, double lambda){
+    double h = 6.62607015e-34;
+    double c = 299792458;
+    double k_B = 1.380649e-23;
+
+    double term1 = (2*h*c*c)/pow(lambda, 5);
+    double term2 = 1/(exp((h*c)/(lambda*k_B*T))-1);
+
+    return term1 * term2;
+}
+
+void irradiance_transfer(double T_lay[], double theta_lay[], double p_lay[], double alphas[], double transmiss[], 
+                        double E_up[], double E_down[], double E_net[], double E_abs[], double Eground, double dt, double dp, int nlayer) {
+
+    // Calculate Flux boundary conditions
+    E_up[nlayer] = Eground; // flux from lowest layer is just ground flux (+ emission of layer itself which is calculated in the upward flux loop)//SIGMA * pow(T_lay[nlayer-1], 4); // lowest layer heating the layer above (Boltzmann)
+    E_down[0] = 0; // highest layer does not receive significant amounts of energy from space
+
+    //calculate downwards fluxes at each level
+    for (int i = 0; i < nlayer; i++){ // so, anstatt i < nlayer +1, weil wir vom oberstem level bis zum boden E_down berechnen
+        E_down[i+1] =  E_down[i] * alphas[i] + SIGMA* pow(T_lay[i], 4) * transmiss[i];
+    }
+
+    E_up[nlayer] = Eground + E_down[nlayer]; // surface balance, what is radiated into ground must be reemitted!
+    // calculate upwards fluxes at each level
+    for (int i = nlayer-1; i > -1 ; i--){ // TODO: check correct loop boundaries and indicecs
+        E_up[i] = E_up[i+1] * alphas[i] + SIGMA * pow(T_lay[i], 4) * transmiss[i];
+    }
+
+    //calculate E_net for each level (E_net = E_dn - E_up)
+    for (int i = 0; i < nlayer + 1;  i++){
+        E_net[i] = E_down[i] - E_up[i]; // upwards flux is "leaving" earth -> negative sign
+    }
+
+    //calculate E_abs for each layer (E_abs = Enet von oben - E_net von unten): problematischster Teil
+    for (int i = 0; i < nlayer; i++){   // Layer quantity
+        E_abs[i] = E_net[i] - E_net[i+1]; // minus makes sense as fluxes pointing upwards are negative --> - (a negative quantity) > 0, basically adding energy
+    }
+
+    // update temperature for each layer using E_abs 
+    for (int i = 0; i < nlayer; i++){
+        double dT = heating_rate(E_abs[i], dt, dp);
+        T_lay[i] += dT;
+    }
+    
+    // update potential temperatures for each layer using E_abs
+    for (int i = 0; i < nlayer; i++){
+        theta_lay[i] = TtoTheta(p_lay[i], T_lay[i], 0);// Update the potential temperature of the layers
+    }
+}
+
   ////////////////////////////
  /// Main program function //
 ////////////////////////////
@@ -114,11 +166,7 @@ void convection(double T_lay[], double theta_lay[], double p_lay[], int nlayer) 
 int main(int argc, char **argv)
 {
     // Model constraints
-<<<<<<< HEAD
     int nlayer = 40;
-=======
-    int nlayer = 200;
->>>>>>> e4b5011d31ef730a86f3add7754d34b223af3b8a
     int n_timesteps = 8000;
 
     // Define atmosphere TODO: sinnvoll sortieren!
@@ -127,11 +175,7 @@ int main(int argc, char **argv)
     double dp = 100000.0 / nlayer; // pressure difference betw. levels (Pa)
     double T_lowest_init = 288; // iniial temperature of lowest layer (K)
 
-<<<<<<< HEAD
     double alpha = 0.944; // absorption coefficient (const for all layers currently); 0.944 yield Eq. Temp of 288.55
-=======
-    double alpha = 0.9999; // absorption coefficient (const for all layers currently)
->>>>>>> e4b5011d31ef730a86f3add7754d34b223af3b8a
     double transmissivity = 1-alpha;
 
     double p_lev[nlayer + 1]; // pressure levels (Pa)
@@ -219,51 +263,9 @@ int main(int argc, char **argv)
         //T_lay[nlayer - 1] += dT;// Update the temperature of the lowermost layer
         //theta_lay[nlayer - 1] = TtoTheta(p_lay[nlayer - 1], T_lay[nlayer - 1], 0);// Update the potential temperature of the lowermost layer
 
-
-        // Calculate Flux boundary conditions
-        E_up[nlayer] = Eground; // flux from lowest layer is just ground flux (+ emission of layer itself which is calculated in the upward flux loop)//SIGMA * pow(T_lay[nlayer-1], 4); // lowest layer heating the layer above (Boltzmann)
-        E_down[0] = 0; // highest layer does not receive significant amounts of energy from space
-
-        //calculate downwards fluxes at each level
-        for (int i = 0; i < nlayer; i++){ // so, anstatt i < nlayer +1, weil wir vom oberstem level bis zum boden E_down berechnen
-            E_down[i+1] =  E_down[i] * alphas[i] + SIGMA* pow(T_lay[i], 4) * transmiss[i];
-        }
-
-<<<<<<< HEAD
-        E_up[nlayer] = Eground + E_down[nlayer]; // surface balance, what is radiated into ground must be reemitted!
-        // calculate upwards fluxes at each level
-        for (int i = nlayer-1; i > -1 ; i--){ // TODO: check correct loop boundaries and indicecs
-            E_up[i] = E_up[i+1] * alphas[i] + SIGMA * pow(T_lay[i], 4) * transmiss[i];
-=======
-        //calculate downwards fluxes at each level
-        for (int i = 0; i < nlayer; i++){ // so, anstatt i < nlayer +1, weil wir vom oberstem level bis zum boden E_down berechnen
-            E_down[i+1] =  E_down[i] * transmiss[i] + SIGMA* pow(T_lay[i], 4) * alphas[i];
->>>>>>> e4b5011d31ef730a86f3add7754d34b223af3b8a
-        }
-
-        //calculate E_net for each level (E_net = E_dn - E_up)
-        for (int i = 0; i < nlayer + 1;  i++){
-            E_net[i] = E_down[i] - E_up[i]; // upwards flux is "leaving" earth -> negative sign
-        }
-
-        //calculate E_abs for each layer (E_abs = Enet von oben - E_net von unten): problematischster Teil
-        for (int i = 0; i < nlayer; i++){   // Layer quantity
-            E_abs[i] = E_net[i] - E_net[i+1]; // minus makes sense as fluxes pointing upwards are negative --> - (a negative quantity) > 0, basically adding energy
-            //if (i == nlayer - 1){ FRAGE: ich checke hier nicht warum da nd i+1 und i+2 stehen muss...
-            //    E_abs[i] = Eground - E_net[i + 1]; // TODO: ground heating included here! Must remove above!
-            //} this is all removed bc at lowest layer E_up[nlayer] = Eground; i.e. surface flux is already accounted for!!
-        }
-
-        // update temperature for each layer using E_abs 
-        for (int i = 0; i < nlayer; i++){
-            double dT = heating_rate(E_abs[i], dt, dp);
-            T_lay[i] += dT;
-        }
-        
-        // update potential temperatures for each layer using E_abs
-        for (int i = 0; i < nlayer; i++){
-            theta_lay[i] = TtoTheta(p_lay[i], T_lay[i], 0);// Update the potential temperature of the layers
-        }
+        // do radiative transfer using only irradiance
+        irradiance_transfer(T_lay, theta_lay, p_lay, alphas, transmiss, 
+                           E_up, E_down, E_net, E_abs, Eground, dt, dp, nlayer);
         
         // do convection
         convection(T_lay, theta_lay, p_lay, nlayer);
