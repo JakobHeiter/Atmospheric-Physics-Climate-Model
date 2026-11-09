@@ -171,10 +171,11 @@ void radiance_transfer(double T_lay[], double tau[], double mu[], int nmu, doubl
 
     for (int k = 0; k < nlambda; k++) {
         double lambda = lambda_low + (k + 0.5) * dlambda;   // Midpointrule, in m
+        double tau_k = tau[k]; // optical depth for this wavelength
         for (int j = 0; j < nmu; j++) {
-            L[0] = 0.0;
+            L[0] = 0.0; // top boundary condition: no incoming radiation from space
             for (int i = 0; i < nlayer; i++) {
-                double x = tau[i] / mu[j];
+                double x = tau_k / mu[j];
                 double t = exp(-x);
                 double a = -expm1(-x);
                 double B = planck(T_lay[i], lambda);
@@ -195,12 +196,13 @@ void radiance_transfer(double T_lay[], double tau[], double mu[], int nmu, doubl
     // upward
     for (int k = 0; k < nlambda; k++) {
         double lambda = lambda_low + (k + 0.5) * dlambda;   // midpoint rule, in m
+        double tau_k = tau[k];                              // optical depth for this wavelength
         double L_surf = planck(T_surf, lambda);             // spectral radiance of the ground
 
         for (int j = 0; j < nmu; j++) {                     // loop over mu angles
             L[nlayer] = L_surf;
             for (int i = nlayer - 1; i >= 0; i--) {         // loop over layers, bottom to top
-                double x = tau[i] / mu[j];
+                double x = tau_k / mu[j];
                 double t = exp(-x);
                 double a = -expm1(-x);
                 double B = planck(T_lay[i], lambda);
@@ -251,7 +253,7 @@ int main(int argc, char **argv)
     clock_t start_time = clock(); // Start measuring time
 
     // Model constraints
-    int nlayer = 50;
+    int nlayer = 20;
     int n_timesteps = 5000;
 
     // Constants defining atmosphere
@@ -291,14 +293,24 @@ int main(int argc, char **argv)
     double mu[nmu]; // mu angles for radiance integration (cosine of zenith angle) 
     for (int j = 0; j < nmu; j++) mu[j] = (j + 0.5) * dmu;   // mid-point rule for integration
 
-    double tau_total = 1.0; // total optical depth of the atmosphere (constant for now, profile TBD)
-    double tau[nlayer]; // optical depth of each layer (tau = tau_total * dp / 100000.0 for now, profile TBD)
-    for (int i = 0; i < nlayer; i++) tau[i] = tau_total * dp / 100000.0; // optical depth of each layer (constant value for now, profile TBD)
-
     double lambda_low = 2e-6; // lower wavelength limit for radiance integration (m) 
     double lambda_high = 200e-6; // upper wavelength limit for radiance integration (m)
-    int nlambda = 300; // number of wavelength points for radiance integration
+    int nlambda = 100; // number of wavelength points for radiance integration
     double dlambda = (lambda_high - lambda_low) / nlambda; // wavelength step size for radiance integration
+
+    double tau[nlambda]; // optical depth for each wavelength
+    double window_bound_low = 8e-6; // lower wavelength limit for atmospheric window (m)
+    double window_bound_high = 12e-6; // upper wavelength limit for atmospheric window (m)
+    double tau_opaque = 1.0; // optical depth for opaque layer (constant for now, profile TBD)
+    double tau_window = 1.0; // optical depth for atmospheric window
+    for (int k = 0; k < nlambda; k++) {
+        double lambda = lambda_low + k * dlambda;
+        if (lambda >= window_bound_low && lambda <= window_bound_high) {
+            tau[k] = tau_window;
+        } else {
+            tau[k] = tau_opaque;
+        }
+    }
 
 
 
