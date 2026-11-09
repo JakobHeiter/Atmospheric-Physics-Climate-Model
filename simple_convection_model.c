@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <stdbool.h>
+#include <time.h>
 
 // Simple convection climate model
 // Conventions: Used Units are SI Units
@@ -25,6 +26,8 @@
 // O Add dynamic stopping condition when in equilibrium (Check temp change over time < epsilon)
 // O Clear the alpha/tau confusion
 // O Implement Radiances as in Lecture
+// O Implement a more realistic tau profile (currently constant for all layers)
+// O plot and inspect radiative flux profiles (-> sanitiy check)
 
 
 
@@ -59,6 +62,18 @@ double TtoTheta (double p, double T, bool inverse){ // an inverse calc could be 
     } else {
         return theta;
     }
+}
+
+double array_sum(double arr[], int n) {// simple fuction to add up all elements of a list
+
+    // Initialize sum to 0
+    double sum = 0;
+    for (int i = 0; i < n; i++) {
+
+        // Add each element to sum
+        sum += arr[i];
+    }
+    return sum;
 }
 
 void init_heights_temps(double p[], double T[], double z[],
@@ -108,13 +123,13 @@ void convection(double T_lay[], double theta_lay[], double p_lay[], int nlayer) 
 }
 
 // calculates the spectral radiance for given temperature and wavelength
-double planck(double T, double lambda){// TODO: potentially already sum over range of lambdas here? Alternatively: Loop calling the func for mult. lambda
+double planck(double T, double lambda_m){
     double h = 6.62607015e-34;         // TODO: check lambda units! Use nm and convert to m in func?
     double c = 299792458;
     double k_B = 1.380649e-23;
 
-    double term1 = (2*h*c*c)/pow(lambda, 5);
-    double term2 = 1/(exp((h*c)/(lambda*k_B*T))-1);
+    double term1 = (2*h*c*c)/pow(lambda_m, 5);// becomes inf! 
+    double term2 = 1/(exp((h*c)/(lambda_m*k_B*T))-1);// becomes 0! 
 
     return term1 * term2;
 }
@@ -139,48 +154,60 @@ void irradiance_transfer(double T_lay[], double alphas[], double transmiss[],
     }
 }
 
-// Radiative transfer via radiance (grey atmosphere, Lambertian surface).
+// Radiative transfer via radiance
 // Integrates L over mu_j to obtain E_up and E_down (E = 2*pi * sum L(mu_j) * mu_j * dmu)
 void radiance_transfer(double T_lay[], double tau[], double mu[], int nmu, double dmu,
-                       double E_up[], double E_down[], double Eground, int nlayer) {
+                       double E_up[], double E_down[], double Eground, double lambda_low, double lambda_high, double dlambda, int nlambda, int nlayer) {
 
     double L[nlayer + 1];   // scratch array, overwritten for each mu_j
 
-    // zero arrays as thei are randomly initialized (problem for += summation)
+    // zero arrays as they are randomly initialized (problem for += summation)
     for (int i = 0; i < nlayer + 1; i++) {
         E_up[i] = 0.0;
         E_down[i] = 0.0;
     }
 
     //downward
-    for (int j = 0; j < nmu; j++) {
-        L[0] = 0.0;// boundary condition at TOA
-        for (int i = 0; i < nlayer; i++) {
-            double x = tau[i] / mu[j];
-            double t = exp(-x);// transmissivity for this path
-            double a = -expm1(-x);
-            double B = SIGMA * pow(T_lay[i], 4) / PI; // grey Planck radiance TODO: use wavelength as parameter and loop outside this func to integrate 
 
-            L[i+1] = L[i] * t + B * a;
-            E_down[i+1] += 2.0 * PI * L[i+1] * mu[j] * dmu;
+    for (int k = 0; k < nlambda; k++) {
+        double lambda = lambda_low + (k + 0.5) * dlambda;   // Midpointrule, in m
+        for (int j = 0; j < nmu; j++) {
+            L[0] = 0.0;
+            for (int i = 0; i < nlayer; i++) {
+                double x = tau[i] / mu[j];
+                double t = exp(-x);
+                double a = -expm1(-x);
+                double B = planck(T_lay[i], lambda);
+
+                L[i+1] = L[i] * t + B * a;
+                E_down[i+1] += 2.0 * PI * L[i+1] * mu[j] * dmu * dlambda;
+            }
         }
     }
 
-    //surface: same radiance in all directions
+    // surface: total upward flux at the ground (irradiance), as before
     E_up[nlayer] = Eground + E_down[nlayer];
-    double L_surf = E_up[nlayer] / PI;
 
-    //upward
-    for (int j = 0; j < nmu; j++) {
-        L[nlayer] = L_surf;
-        for (int i = nlayer - 1; i >= 0; i--) {
-            double x = tau[i] / mu[j];
-            double t = exp(-x);
-            double a = -expm1(-x);
-            double B = SIGMA * pow(T_lay[i], 4) / PI;
+    // spectral lower boundary condition: surface emits like a blackbody
+    // whose temperature is chosen such that sigma * T_surf^4 = E_up[nlayer]
+    double T_surf = pow(E_up[nlayer] / SIGMA, 0.25);
 
-            L[i] = L[i+1] * t + B * a;
-            E_up[i] += 2.0 * PI * L[i] * mu[j] * dmu;
+    // upward
+    for (int k = 0; k < nlambda; k++) {
+        double lambda = lambda_low + (k + 0.5) * dlambda;   // midpoint rule, in m
+        double L_surf = planck(T_surf, lambda);             // spectral radiance of the ground
+
+        for (int j = 0; j < nmu; j++) {                     // loop over mu angles
+            L[nlayer] = L_surf;
+            for (int i = nlayer - 1; i >= 0; i--) {         // loop over layers, bottom to top
+                double x = tau[i] / mu[j];
+                double t = exp(-x);
+                double a = -expm1(-x);
+                double B = planck(T_lay[i], lambda);
+
+                L[i] = L[i+1] * t + B * a;
+                E_up[i] += 2.0 * PI * L[i] * mu[j] * dmu * dlambda;
+            }
         }
     }
 }
@@ -221,9 +248,11 @@ void adjust_temps(double E_down[], double E_up[],  double E_net[], double E_abs[
 
 int main(int argc, char **argv)
 {
+    clock_t start_time = clock(); // Start measuring time
+
     // Model constraints
-    int nlayer = 40;
-    int n_timesteps = 8000;
+    int nlayer = 50;
+    int n_timesteps = 5000;
 
     // Constants defining atmosphere
     double Eground = 240; // default for incoming energy on ground (W/m^2)
@@ -251,18 +280,13 @@ int main(int argc, char **argv)
     double E_down [nlayer+1]; // downward energy flux at each level (W/m^2) (Irradiance)
     double E_net [nlayer+1]; // net energy flux at each level(W/m^2) (Irradiance)
 
-    double L_up[nlayer+1]; // upward energy flux at each level (W/m^2 ster) (Radiance)
-    double L_down[nlayer+1]; // downward energy flux at each level (W/m^2 ster) (Radiance)
-    double L_net[nlayer+1]; // net energy flux at each level (W/m^2 ster) (Radiance)
-    
     double E_abs [nlayer]; // LAYER QTY!! Net absorbed energy at each layer (E_net[i] - E_net[i+1]) (Irradiance)
-
-    double L_abs [nlayer]; // LAYER QTY!! Net absorbed energy at each layer (L_net[i] - L_net[i+1]) (Radiance)
 
     double alphas [nlayer]; // absorption coefficients of each layer
     double transmiss [nlayer]; // transmissivity of each layer (t = 1-alpha)
 
-    int nmu = 20; // amount of mu angles to integrate over for radiance transfer, will/can/should be increased
+    // Radiance related quantities
+    int nmu = 10; // amount of mu angles to integrate over for radiance transfer, will/can/should be increased
     double dmu = 1.0 / nmu; // step size for mu integration
     double mu[nmu]; // mu angles for radiance integration (cosine of zenith angle) 
     for (int j = 0; j < nmu; j++) mu[j] = (j + 0.5) * dmu;   // mid-point rule for integration
@@ -270,6 +294,12 @@ int main(int argc, char **argv)
     double tau_total = 1.0; // total optical depth of the atmosphere (constant for now, profile TBD)
     double tau[nlayer]; // optical depth of each layer (tau = tau_total * dp / 100000.0 for now, profile TBD)
     for (int i = 0; i < nlayer; i++) tau[i] = tau_total * dp / 100000.0; // optical depth of each layer (constant value for now, profile TBD)
+
+    double lambda_low = 2e-6; // lower wavelength limit for radiance integration (m) 
+    double lambda_high = 200e-6; // upper wavelength limit for radiance integration (m)
+    int nlambda = 300; // number of wavelength points for radiance integration
+    double dlambda = (lambda_high - lambda_low) / nlambda; // wavelength step size for radiance integration
+
 
 
     for (int i = 0; i < nlayer; i++) {// initialize alpha vals for all layers (constant value for now, profile TBD)
@@ -334,10 +364,10 @@ int main(int argc, char **argv)
         //irradiance_transfer(T_lay, alphas, transmiss, E_up, E_down, Eground, nlayer);
 
         // do radiative transfer using radiance
-        radiance_transfer(T_lay, tau, mu, nmu, dmu, L_up, L_down, Eground,  nlayer);
+        radiance_transfer(T_lay, tau, mu, nmu, dmu, E_up, E_down, Eground, lambda_low, lambda_high, dlambda, nlambda,  nlayer);
 
         // adjust temperatures from level Energy transfer
-        adjust_temps(L_down, L_up, L_net, L_abs, T_lay, theta_lay, p_lay, dt, dp, nlayer);
+        adjust_temps(E_down, E_up, E_net, E_abs, T_lay, theta_lay, p_lay, dt, dp, nlayer);
         
         // do convection
         convection(T_lay, theta_lay, p_lay, nlayer);
@@ -357,9 +387,13 @@ int main(int argc, char **argv)
         count++; // increment counter after each timestep
     }
 
+    clock_t end_time = clock(); // End measuring time
+    double elapsed_time = (double)(end_time - start_time) / CLOCKS_PER_SEC; // Calculate elapsed time in seconds
+    double elapsed_time_minutes = elapsed_time / 60.0; // Convert to minutes, use %.0f for printing to round down to nearest minute
+    double elapsed_time_seconds = fmod(elapsed_time, 60.0); // Get remaining seconds after minutes
 
     // Print results of model run
-    printf("Model run completed after %i iterations \n", count);
+    printf("Model run completed after %i iterations in %.0f minutes and %.2f seconds\n", count, elapsed_time_minutes, elapsed_time_seconds);
     for (int i = 0; i < nlayer; i++)
     {
         printf("Layer %d: p = %.1f Pa, theta = %.2f K, temperature = %.2f K\n",
