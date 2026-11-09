@@ -124,7 +124,7 @@ void convection(double T_lay[], double theta_lay[], double p_lay[], int nlayer) 
 
 // calculates the spectral radiance for given temperature and wavelength
 double planck(double T, double lambda_m){
-    double h = 6.62607015e-34;         // TODO: check lambda units! Use nm and convert to m in func?
+    double h = 6.62607015e-34;
     double c = 299792458;
     double k_B = 1.380649e-23;
 
@@ -262,8 +262,8 @@ int main(int argc, char **argv)
     double dp = 100000.0 / nlayer; // pressure difference betw. levels (Pa)
     double T_lowest_init = 288; // iniial temperature of lowest layer (K)
 
-    // constants defining radiation behaviour
-    double alpha = 0.944; // absorption coefficient (const for all layers currently); 0.944 yield Eq. Temp of 288.55
+    // constants defining radiation behaviour, unused for radiance ops
+    double alpha = 0.944; // absorption coefficient (const for all layers currently); 0.944 yields Eq. Temp of 288.55
     double transmissivity = 1-alpha;
 
     //atmospheric quantities
@@ -298,11 +298,13 @@ int main(int argc, char **argv)
     int nlambda = 100; // number of wavelength points for radiance integration
     double dlambda = (lambda_high - lambda_low) / nlambda; // wavelength step size for radiance integration
 
+    double tau_total  = 2.42; // total optical depth for the atmosphere 
     double tau[nlambda]; // optical depth for each wavelength
     double window_bound_low = 8e-6; // lower wavelength limit for atmospheric window (m)
     double window_bound_high = 12e-6; // upper wavelength limit for atmospheric window (m)
-    double tau_opaque = 1.0; // optical depth for opaque layer (constant for now, profile TBD)
-    double tau_window = 1.0; // optical depth for atmospheric window
+    double tau_opaque = tau_total/nlayer; // optical depth for opaque layer (constant for now, profile TBD)
+    double tau_window = 0.0; // optical depth for atmospheric window
+
     for (int k = 0; k < nlambda; k++) {
         double lambda = lambda_low + k * dlambda;
         if (lambda >= window_bound_low && lambda <= window_bound_high) {
